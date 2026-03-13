@@ -1,0 +1,13 @@
+{
+  "name": "nekoai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A minimal Cloudflare Workers AI chat frontend for OpenAI-compatible APIs.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.57.1"
+  }
+}

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NekoAI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="loginScreen" class="login-screen">
+      <div class="login-card">
+        <div class="login-logo">N</div>
+        <h1>NekoAI</h1>
+        <p>先输入访问密钥，再进入聊天。</p>
+        <form id="loginForm" class="login-form">
+          <input id="loginAccessKeyInput" type="password" placeholder="输入访问密钥" autocomplete="off" />
+          <button type="submit" class="send-btn login-btn">进入聊天</button>
+        </form>
+        <div id="loginError" class="login-error"></div>
+      </div>
+    </div>
+
+    <div id="appShell" class="app-shell hidden">
+      <div id="mobileSidebarBackdrop" class="mobile-sidebar-backdrop hidden"></div>
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <div class="brand-wrap">
+            <div class="brand-logo">N</div>
+            <div>
+              <div class="brand">NekoAI</div>
+              <div class="brand-subtitle">Simple AI chat</div>
+            </div>
+          </div>
+          <button id="newChatBtn" class="new-chat-btn">+ 新建聊天</button>
+        </div>
+
+        <div class="sidebar-section-header">
+          <div class="sidebar-section-label">最近会话</div>
+          <button id="clearAllBtn" class="sidebar-text-btn" type="button">清空</button>
+        </div>
+        <div id="conversationList" class="conversation-list"></div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-mobile-row">
+            <button id="mobileSidebarToggle" class="mobile-sidebar-toggle" type="button" aria-label="打开侧栏">☰</button>
+            <div class="topbar-title compact-title">
+              <h1>NekoAI</h1>
+            </div>
+            <div class="control-panel compact-control-panel">
+              <div class="model-group model-group-plain">
+                <div id="modelDropdown" class="model-dropdown">
+                  <button id="modelDropdownButton" type="button" class="model-dropdown-button" aria-expanded="false">
+                    <span id="modelDropdownLabel">选择模型</span>
+                    <span class="model-dropdown-caret"></span>
+                  </button>
+                  <div id="modelDropdownMenu" class="model-dropdown-menu"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section id="messages" class="messages"></section>
+
+        <footer class="composer-shell">
+          <form id="chatForm" class="composer-card">
+            <div id="attachmentList" class="attachment-list"></div>
+            <textarea id="messageInput" placeholder="给 NekoAI 发消息" rows="1"></textarea>
+            <div class="composer-bottom compact-composer-bottom">
+              <label for="fileInput" id="attachBtn" class="attach-btn" aria-label="添加文件">+</label>
+              <div class="composer-hint">支持图片、文档、压缩包等</div>
+              <div class="composer-actions single-line-actions">
+                <button type="submit" id="sendBtn" class="send-btn compact-send-btn">发送</button>
+              </div>
+            </div>
+            <input id="fileInput" type="file" multiple hidden />
+          </form>
+        </footer>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/config.js"></script>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
