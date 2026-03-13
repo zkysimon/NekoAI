@@ -660,6 +660,14 @@ function renderMessages() {
 
     renderMessageContent(row.querySelector('.message-content'), message);
 
+    // 用户消息内容为空时隐藏气泡（如纯附件消息）
+    if (message.role === 'user') {
+      const contentEl = row.querySelector('.message-content');
+      if (!contentEl.children.length && !contentEl.textContent.trim()) {
+        contentEl.style.display = 'none';
+      }
+    }
+
     const attachmentWrap = row.querySelector('.message-attachments');
     if (message.attachments?.length) {
       message.attachments.forEach((file) => {

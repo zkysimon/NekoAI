@@ -72,7 +72,11 @@
             <div id="attachmentList" class="attachment-list"></div>
             <textarea id="messageInput" placeholder="给 NekoAI 发消息" rows="1"></textarea>
             <div class="composer-bottom compact-composer-bottom">
-              <label for="fileInput" id="attachBtn" class="attach-btn" aria-label="添加文件">+</label>
+              <label for="fileInput" id="attachBtn" class="attach-btn" aria-label="添加文件">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </label>
               <div class="composer-hint">支持图片、文档、压缩包等</div>
               <div class="composer-actions single-line-actions">
                 <button type="submit" id="sendBtn" class="send-btn compact-send-btn">发送</button>
