@@ -79,7 +79,7 @@ npm run deploy
 - `nekoai-api`
 
 默认地址类似：
-- `https://nekoai-api.zimk.workers.dev`
+- `https://nekoai-api.your-subdomain.workers.dev`
 
 ### 2. 部署 Pages 前端
 
@@ -93,7 +93,7 @@ npm run deploy
 
 ```js
 window.NEKOAI_CONFIG = {
-  API_BASE_URL: "https://nekoai-api.git.llc"
+  API_BASE_URL: "https://nekoai-api.your-subdomain.workers.dev"
 };
 ```
 
