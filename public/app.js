@@ -322,6 +322,50 @@ async function addPendingFiles(files) {
       continue;
     }
 
+    const kind = getAttachmentKind(file);
+    let parsedText = null;
+
+    // Office 文件：前端解析提取文本
+    if (kind === 'docx') {
+      try {
+        const arrayBuffer = await readFileAsArrayBuffer(file);
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        parsedText = result.value || '';
+      } catch (err) {
+        console.warn('mammoth 解析失败', err);
+      }
+    } else if (kind === 'xlsx') {
+      try {
+        const arrayBuffer = await readFileAsArrayBuffer(file);
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const lines = [];
+        workbook.SheetNames.forEach((sheetName) => {
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          if (csv.trim()) lines.push(`## Sheet: ${sheetName}\n${csv}`);
+        });
+        parsedText = lines.join('\n\n');
+      } catch (err) {
+        console.warn('SheetJS 解析失败', err);
+      }
+    } else if (kind === 'pptx') {
+      try {
+        const arrayBuffer = await readFileAsArrayBuffer(file);
+        // pptx 本质是 zip，用 XLSX 的 zip 工具提取文本节点
+        const zip = XLSX.read(arrayBuffer, { type: 'array' });
+        const textParts = [];
+        Object.keys(zip.Strings || {}).forEach((k) => {
+          const v = zip.Strings[k];
+          if (typeof v === 'string' && v.trim()) textParts.push(v.trim());
+        });
+        // 更可靠的方式：直接用 JSZip-like 解包（XLSX 内置 CFB/ZIP）
+        // 若 zip.Strings 为空则给提示
+        parsedText = textParts.length ? textParts.join('\n') : '（PPT 文本提取失败，内容可能为空）';
+      } catch (err) {
+        console.warn('pptx 解析失败', err);
+      }
+    }
+
     const dataUrl = await readFileAsDataURL(file);
     const base64 = dataUrl.split(',')[1] || '';
     state.pendingAttachments.push({
@@ -329,13 +373,23 @@ async function addPendingFiles(files) {
       name: file.name,
       type: file.type || 'application/octet-stream',
       size: file.size,
-      kind: getAttachmentKind(file),
+      kind,
       dataUrl,
       base64,
+      parsedText,
     });
   }
 
   renderAttachments();
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`读取文件失败：${file.name}`));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 function renderAttachments() {
@@ -878,6 +932,35 @@ function loadConversations() {
 
 function getAttachmentKind(file) {
   if (file.type?.startsWith('image/')) return 'image';
+  const textTypes = [
+    'text/',
+    'application/json',
+    'application/xml',
+    'application/javascript',
+    'application/typescript',
+    'application/x-yaml',
+    'application/x-sh',
+    'application/x-python',
+  ];
+  if (textTypes.some((t) => file.type?.startsWith(t))) return 'text';
+  const textExts = /\.(txt|md|markdown|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|sh|bash|zsh|py|js|ts|jsx|tsx|java|c|cpp|h|hpp|cs|go|rs|rb|php|swift|kt|scala|r|sql|html|htm|css|scss|sass|less|vue|svelte|astro|diff|patch)$/i;
+  if (textExts.test(file.name)) return 'text';
+  if (file.type === 'application/pdf') return 'pdf';
+  const docxTypes = [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+  ];
+  const xlsxTypes = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+  ];
+  const pptxTypes = [
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-powerpoint',
+  ];
+  if (docxTypes.includes(file.type) || /\.(docx|doc)$/i.test(file.name)) return 'docx';
+  if (xlsxTypes.includes(file.type) || /\.(xlsx|xls)$/i.test(file.name)) return 'xlsx';
+  if (pptxTypes.includes(file.type) || /\.(pptx|ppt)$/i.test(file.name)) return 'pptx';
   return 'file';
 }
 
