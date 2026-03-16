@@ -364,6 +364,23 @@ async function addPendingFiles(files) {
       } catch (err) {
         console.warn('pptx 解析失败', err);
       }
+    } else if (kind === 'pdf') {
+      try {
+        const arrayBuffer = await readFileAsArrayBuffer(file);
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pageTexts = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((item) => item.str).join(' ');
+          if (pageText.trim()) pageTexts.push(`[第 ${i} 页]\n${pageText}`);
+        }
+        parsedText = pageTexts.join('\n\n') || '（PDF 文本提取为空，可能是扫描件）';
+      } catch (err) {
+        console.warn('pdf.js 解析失败', err);
+      }
     }
 
     const dataUrl = await readFileAsDataURL(file);
@@ -539,8 +556,14 @@ function buildUserMessage(message, attachments) {
         type: 'text',
         text: `文件名：${file.name}\n内容：\n\`\`\`\n${decoded}\n\`\`\``,
       });
+    } else if ((file.kind === 'docx' || file.kind === 'xlsx' || file.kind === 'pptx' || file.kind === 'pdf') && file.parsedText != null) {
+      // Office 文档 / PDF：使用前端解析出的文本内联
+      content.push({
+        type: 'text',
+        text: `文件名：${file.name}\n内容：\n\`\`\`\n${file.parsedText}\n\`\`\``,
+      });
     } else {
-      // PDF / 其他二进制：记录下来，后面统一追加描述
+      // 其他二进制：记录下来，后面统一追加描述
       nonInlineable.push(file);
     }
   });
