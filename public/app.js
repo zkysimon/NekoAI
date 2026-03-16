@@ -256,8 +256,10 @@ async function loginWithKey(key, surfaceError = true) {
     localStorage.removeItem(MODEL_STORAGE);
     localStorage.removeItem(ACCESS_KEY_STORAGE);
     renderModelDropdown();
-    if (surfaceError) setLoginError(error.message || '登录失败');
-    showLogin();
+    if (surfaceError) {
+      setLoginError(error.message || '登录失败');
+      showLogin();
+    }
     return false;
   }
 }
