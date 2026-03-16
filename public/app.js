@@ -36,6 +36,8 @@ const mobileSidebarBackdropEl = document.getElementById('mobileSidebarBackdrop')
 const fileInputEl = document.getElementById('fileInput');
 const attachBtnEl = document.getElementById('attachBtn');
 const attachmentListEl = document.getElementById('attachmentList');
+const stopBtnEl = document.getElementById('stopBtn');
+const exportBtnEl = document.getElementById('exportBtn');
 
 boot();
 
@@ -128,6 +130,16 @@ function bindEvents() {
     const files = Array.from(fileInputEl.files || []);
     await addPendingFiles(files);
     fileInputEl.value = '';
+  });
+
+  stopBtnEl.addEventListener('click', () => {
+    if (state.abortController) {
+      state.abortController.abort();
+    }
+  });
+
+  exportBtnEl.addEventListener('click', () => {
+    exportConversation();
   });
 
   messageInputEl.addEventListener('input', () => {
@@ -434,14 +446,24 @@ function renderAttachments() {
 async function sendChat(accessKey, model, conversation, assistantMessage, attachments) {
   const payload = buildChatPayload(model, conversation, assistantMessage, attachments);
 
-  const response = await fetch(`${API_BASE_URL}/api/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  state.abortController = new AbortController();
+  const signal = state.abortController.signal;
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    throw err;
+  }
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -460,41 +482,52 @@ async function sendChat(accessKey, model, conversation, assistantMessage, attach
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() || '';
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
 
-    for (const part of parts) {
-      const lines = part.split('\n');
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const data = line.slice(5).trim();
-        if (!data || data === '[DONE]') continue;
+      for (const part of parts) {
+        const lines = part.split('\n');
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
 
-        try {
-          const json = JSON.parse(data);
-          const delta = json.choices?.[0]?.delta?.content;
-          if (typeof delta === 'string' && delta) {
-            assistantMessage.content += delta;
-            updateThinkTiming(assistantMessage);
-            renderMessages();
-          } else if (Array.isArray(delta)) {
-            const text = delta.map((item) => item?.text || '').join('');
-            if (text) {
-              assistantMessage.content += text;
+          try {
+            const json = JSON.parse(data);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (typeof delta === 'string' && delta) {
+              assistantMessage.content += delta;
               updateThinkTiming(assistantMessage);
               renderMessages();
+            } else if (Array.isArray(delta)) {
+              const text = delta.map((item) => item?.text || '').join('');
+              if (text) {
+                assistantMessage.content += text;
+                updateThinkTiming(assistantMessage);
+                renderMessages();
+              }
             }
+          } catch {
+            // ignore invalid chunk
           }
-        } catch {
-          // ignore invalid chunk
         }
       }
     }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      // 用户主动停止，保留已生成内容
+      updateThinkTiming(assistantMessage, true);
+      return;
+    }
+    throw err;
+  } finally {
+    state.abortController = null;
   }
 }
 
@@ -580,6 +613,73 @@ function buildUserMessage(message, attachments) {
   }
 
   return { role: 'user', content };
+}
+
+async function regenLastAssistant() {
+  if (state.sending) return;
+  const conversation = getActiveConversation();
+  if (!conversation) return;
+
+  // 找到最后一条 assistant 消息，删掉它，重新发
+  const lastIdx = conversation.messages.map((m) => m.role).lastIndexOf('assistant');
+  if (lastIdx === -1) return;
+  conversation.messages.splice(lastIdx, 1);
+
+  const accessKey = localStorage.getItem(ACCESS_KEY_STORAGE) || '';
+  const model = state.selectedModel;
+  if (!accessKey || !model) return;
+
+  const assistantMessage = { role: 'assistant', content: '', createdAt: Date.now() };
+  conversation.messages.push(assistantMessage);
+  conversation.updatedAt = Date.now();
+
+  state.sending = true;
+  updateSendingState();
+  renderMessages();
+
+  try {
+    await sendChat(accessKey, model, conversation, assistantMessage, []);
+  } catch (err) {
+    assistantMessage.content = `请求失败：${err.message}`;
+  } finally {
+    state.sending = false;
+    updateSendingState();
+    conversation.updatedAt = Date.now();
+    persistConversations();
+    renderConversationList();
+    renderMessages();
+    focusComposer();
+  }
+}
+
+function exportConversation() {
+  const conversation = getActiveConversation();
+  if (!conversation || !conversation.messages.length) {
+    alert('当前会话没有内容可以导出。');
+    return;
+  }
+
+  const lines = [`# ${conversation.title || '新会话'}`, ''];
+  conversation.messages.forEach((msg) => {
+    const role = msg.role === 'assistant' ? '**NekoAI**' : '**用户**';
+    const content = String(msg.content || '')
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<think>[\s\S]*$/gi, '')
+      .trim();
+    lines.push(`${role}\n\n${content}`, '');
+    if (msg.attachments?.length) {
+      msg.attachments.forEach((f) => lines.push(`> 附件：${f.name} (${formatBytes(f.size)})`, ''));
+    }
+    lines.push('---', '');
+  });
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${(conversation.title || '会话').slice(0, 40)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function extractAssistantText(data) {
@@ -781,7 +881,49 @@ function renderMessages() {
       });
     }
 
+    // 复制按钮（所有消息）
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'message-copy-btn';
+    copyBtn.type = 'button';
+    copyBtn.textContent = '复制';
+    copyBtn.addEventListener('click', () => {
+      const plainText = String(message.content || '')
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<think>[\s\S]*$/gi, '')
+        .trim();
+      navigator.clipboard.writeText(plainText).then(() => {
+        copyBtn.textContent = '已复制';
+        copyBtn.classList.add('copied');
+        setTimeout(() => { copyBtn.textContent = '复制'; copyBtn.classList.remove('copied'); }, 1500);
+      });
+    });
+    row.querySelector('.message-bubble').appendChild(copyBtn);
+
+    // 重新生成按钮（仅 assistant 最后一条）
+    const isLastAssistant = message.role === 'assistant' &&
+      conversation.messages[conversation.messages.length - 1] === message;
+    if (isLastAssistant && !state.sending) {
+      const regenBtn = document.createElement('button');
+      regenBtn.className = 'message-regen-btn';
+      regenBtn.type = 'button';
+      regenBtn.textContent = '重新生成';
+      regenBtn.addEventListener('click', () => regenLastAssistant());
+      row.querySelector('.message-bubble').appendChild(regenBtn);
+    }
+
     messagesEl.appendChild(row);
+  });
+
+  // 代码块复制按钮事件委托
+  messagesEl.querySelectorAll('.copy-code-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const code = btn.previousElementSibling?.querySelector('code')?.textContent || '';
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = '已复制';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 1500);
+      });
+    });
   });
 
   if (thinkingMsg) startLiveThinkTicker();
@@ -852,7 +994,7 @@ function renderMarkdown(input) {
 
   renderer.code = ({ text, lang }) => {
     const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return `<pre class="md-pre"><code>${escaped}</code></pre>`;
+    return `<div class="md-pre-wrap"><pre class="md-pre"><code>${escaped}</code></pre><button class="copy-code-btn" type="button">复制</button></div>`;
   };
 
   renderer.image = ({ href, title, text }) => {
@@ -916,6 +1058,13 @@ function stopLiveThinkTicker() {
 function updateSendingState() {
   sendBtnEl.disabled = state.sending;
   sendBtnEl.textContent = state.sending ? '发送中...' : '发送';
+  if (state.sending) {
+    stopBtnEl.classList.remove('hidden');
+    sendBtnEl.classList.add('hidden');
+  } else {
+    stopBtnEl.classList.add('hidden');
+    sendBtnEl.classList.remove('hidden');
+  }
 }
 
 function autoResizeTextarea() {
