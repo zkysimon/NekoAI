@@ -79,7 +79,7 @@ npm run deploy
 - `nekoai-api`
 
 默认地址类似：
-- `https://nekoai-api.<your-subdomain>.workers.dev`
+- `https://nekoai-api.zimk.workers.dev`
 
 ### 2. 部署 Pages 前端
 
