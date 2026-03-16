@@ -743,22 +743,22 @@ body.theme-light .md-pre { background: #f3f4f6; border-color: rgba(15,23,42,.08)
   right: 8px;
   padding: 4px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: rgba(255,255,255,.08);
-  color: var(--muted);
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.12);
+  color: #ccc;
   font-size: 12px;
   cursor: pointer;
-  opacity: 0;
+  opacity: 1;
   transition: opacity .15s ease, background .15s ease;
 }
-.md-pre-wrap:hover .copy-code-btn { opacity: 1; }
-.copy-code-btn:hover { background: rgba(255,255,255,.16); color: var(--text); }
+.copy-code-btn:hover { background: rgba(255,255,255,.22); color: #fff; }
 .copy-code-btn.copied { color: #4ade80; }
 body.theme-light .copy-code-btn {
-  border-color: rgba(0,0,0,.1);
-  background: rgba(0,0,0,.04);
+  border-color: rgba(0,0,0,.15);
+  background: rgba(0,0,0,.06);
+  color: #555;
 }
-body.theme-light .copy-code-btn:hover { background: rgba(0,0,0,.08); }
+body.theme-light .copy-code-btn:hover { background: rgba(0,0,0,.12); color: #111; }
 
 /* 消息复制按钮 */
 .message-copy-btn {
