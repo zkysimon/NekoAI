@@ -452,31 +452,57 @@ function buildUserMessage(message, attachments) {
     return { role: 'user', content: message.content || '' };
   }
 
-  const attachmentText = attachments
-    .map((file) => `- ${file.name} (${file.type || 'application/octet-stream'}, ${formatBytes(file.size)})`)
-    .join('\n');
-
   const promptText = message.content || '请读取并处理这些附件。';
-  const content = [
-    {
-      type: 'text',
-      text: `${promptText}\n\n附件列表：\n${attachmentText}`,
-    },
-  ];
+  const content = [];
+
+  // 先放主文本
+  if (promptText) {
+    content.push({ type: 'text', text: promptText });
+  }
+
+  const nonInlineable = [];
 
   attachments.forEach((file) => {
-    content.push({
-      type: 'image_url',
-      image_url: {
-        url: file.dataUrl,
-      },
-    });
+    if (file.kind === 'image') {
+      // 图片：用 image_url + base64 data URL（OpenAI 标准）
+      content.push({
+        type: 'image_url',
+        image_url: { url: file.dataUrl },
+      });
+    } else if (file.kind === 'text') {
+      // 文本类文件：解码 base64，内联为 text block
+      let decoded = '';
+      try {
+        decoded = atob(file.base64);
+        // 尝试 UTF-8 解码（处理多字节字符）
+        decoded = new TextDecoder('utf-8').decode(
+          Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0))
+        );
+      } catch {
+        decoded = file.base64;
+      }
+      content.push({
+        type: 'text',
+        text: `文件名：${file.name}\n内容：\n\`\`\`\n${decoded}\n\`\`\``,
+      });
+    } else {
+      // PDF / 其他二进制：记录下来，后面统一追加描述
+      nonInlineable.push(file);
+    }
   });
 
-  return {
-    role: 'user',
-    content,
-  };
+  // 不可内联的文件：追加描述性文本
+  if (nonInlineable.length) {
+    const desc = nonInlineable
+      .map((f) => `- ${f.name} (${f.type || 'application/octet-stream'}, ${formatBytes(f.size)})`)
+      .join('\n');
+    content.push({
+      type: 'text',
+      text: `以下附件无法直接内联，仅供参考：\n${desc}`,
+    });
+  }
+
+  return { role: 'user', content };
 }
 
 function extractAssistantText(data) {
@@ -732,39 +758,52 @@ function renderMessageContent(container, message) {
     container.appendChild(details);
   }
 
-  // 主文本
-  const images = extractImageDataUrls(mainText);
-  const textOnly = removeImageDataUrls(mainText).trim();
-  if (textOnly) {
+  // 主文本（marked.js 会自动处理图片）
+  if (mainText) {
     const div = document.createElement('div');
-    div.innerHTML = renderMarkdown(textOnly);
-    container.appendChild(div);
-  }
-  if (images.length) {
-    const gallery = document.createElement('div');
-    gallery.className = 'message-image-gallery';
-    images.forEach((src) => {
-      const img = document.createElement('img');
-      img.src = src;
+    div.innerHTML = renderMarkdown(mainText);
+    // 给 marked 渲染出来的 img 加上样式类
+    div.querySelectorAll('img').forEach((img) => {
       img.className = 'message-inline-image';
-      gallery.appendChild(img);
     });
-    container.appendChild(gallery);
+    container.appendChild(div);
   }
 }
 
 function renderMarkdown(input) {
-  return marked.parse(String(input || ''), {
-    renderer: (() => {
-      const r = new marked.Renderer();
-      r.code = ({ text, lang }) => {
-        const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        return `<pre class="md-pre"><code>${escaped}</code></pre>`;
-      };
-      return r;
-    })(),
-    breaks: true,
-  });
+  const renderer = new marked.Renderer();
+
+  renderer.code = ({ text, lang }) => {
+    const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<pre class="md-pre"><code>${escaped}</code></pre>`;
+  };
+
+  renderer.image = ({ href, title, text }) => {
+    if (!href) return '';
+    const isVideo = /\.(mp4|webm|ogg|mov)([?#]|$)/i.test(href) || /video/i.test(href);
+    if (isVideo) {
+      return `<video class="message-inline-video" controls playsinline preload="metadata" style="max-width:100%;border-radius:12px;margin-top:8px">
+        <source src="${href}">
+        <a href="${href}" target="_blank">点击查看视频</a>
+      </video>`;
+    }
+    const alt = text || title || '';
+    return `<img class="message-inline-image" src="${href}" alt="${alt}">`;
+  };
+
+  renderer.link = ({ href, title, text }) => {
+    if (!href) return text;
+    const isVideo = /\.(mp4|webm|ogg|mov)([?#]|$)/i.test(href) || /video/i.test(href);
+    if (isVideo) {
+      return `<video class="message-inline-video" controls playsinline preload="metadata" style="max-width:100%;border-radius:12px;margin-top:8px">
+        <source src="${href}">
+        <a href="${href}" target="_blank">点击查看视频</a>
+      </video>`;
+    }
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  };
+
+  return marked.parse(String(input || ''), { renderer, breaks: true });
 }
 
 function extractImageDataUrls(text) {
