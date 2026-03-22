@@ -1,0 +1,8 @@
+name = "nekoai-api"
+main = "src/index.js"
+compatibility_date = "2026-03-12"
+workers_dev = true
+
+# routes = [
+#   { pattern = "nekoai-api.yourdomain.com", custom_domain = true }
+# ]
