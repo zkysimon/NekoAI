@@ -70,6 +70,8 @@ async function handleChat(request, env) {
     return json({ error: 'Invalid JSON body' }, 400, request, env);
   }
 
+  payload.max_tokens = 2048;
+
   const upstream = await fetch(joinUrl(env.OPENAI_BASE_URL, '/v1/chat/completions'), {
     method: 'POST',
     headers: {
