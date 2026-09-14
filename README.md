@@ -164,19 +164,26 @@ window.NEKOAI_CONFIG = {
 
 不同类型的附件走不同链路，尽量把内容转成文本喂给模型：
 
-| 类型 | 处理方式 |
-| --- | --- |
-| 图片 | 直接以 base64 data URL 传给视觉模型 |
-| PDF | 优先 Workers AI `toMarkdown`；失败则前端 pdf.js 抽文本 |
-| docx | 前端 mammoth 抽正文 |
-| xlsx / xls | 前端 SheetJS 转 CSV |
-| pptx | 前端 JSZip 解包，按页抽幻灯片文本 |
-| zip / apk / epub 等 | 前端 JSZip 解包，展开其中文本文件（含预算截断） |
-| ods / odt / numbers 等 | Workers AI `toMarkdown` |
-| 纯文本 / 代码 | 直接读文本注入 |
+| 类型 | 文字 | 图片 |
+| --- | --- | --- |
+| 图片 | — | 直接以 base64 data URL 传给视觉模型 |
+| PDF | pdf.js 抽文字层 | 前 10 页渲染成 JPEG 一起发送 |
+| docx | mammoth 抽正文 | 抽取 `word/media/` 内嵌图片 |
+| xlsx / xls | SheetJS 转 CSV | 抽取 `xl/media/` 内嵌图片 |
+| pptx | JSZip 按页抽文本 | 按幻灯片顺序抽取 `ppt/media/` 图片 |
+| ods / odt / numbers 等 | Workers AI `toMarkdown` | — |
+| zip / apk / epub 等 | JSZip 展开其中文本文件 | — |
+| 纯文本 / 代码 | 直接读文本注入 | — |
+
+图片会以 `image_url`（base64）跟随文字一起发送，因此模型能「看到」文档里的截图、
+图表与流程图，而不只是文字。限制：
+
+- 每个文档最多 12 张图、单张不超过 3MB
+- PDF 最多渲染前 10 页
+- 需要模型支持视觉输入（vision）
 
 若某文件既无法云端转换、也无法本地解析，会在附件卡片上标记「解析失败」，
-并把原因一并告诉模型，而不是静默丢弃。
+并把原因一并告诉模型，而不是静默丢弃。附件卡片会显示提取到的图片数量。
 
 Workers AI 绑定（`wrangler.jsonc`）：
 

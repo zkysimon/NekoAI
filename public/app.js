@@ -7,6 +7,10 @@ const MAX_CONTEXT_CHARS = 256 * 1024;
 const MAX_STORED_TRACE_ITEMS = 8;
 const MAX_STORED_TEXT_CHARS = 400;
 const MAX_STORED_SOURCES = 5;
+const MAX_DOC_IMAGES = 12;
+const MAX_DOC_IMAGE_BYTES = 3 * 1024 * 1024;
+const MAX_PDF_PAGES = 10;
+const PDF_RENDER_SCALE = 1.6;
 
 const state = {
   conversations: loadConversations(),
@@ -409,14 +413,19 @@ async function addPendingFiles(files, accessKey) {
     const kind = getAttachmentKind(file);
     let parsedText = null;
     let parseError = null;
+    let images = [];
 
     try {
       if (kind === 'archive') {
         parsedText = await extractArchiveText(file);
       } else if (kind === 'docx' || kind === 'xlsx' || kind === 'pptx') {
-        parsedText = await extractOfficeText(file, kind);
+        const result = await extractOfficeContent(file, kind);
+        parsedText = result.text;
+        images = result.images;
       } else if (kind === 'pdf') {
-        parsedText = await extractPdfText(file);
+        const result = await extractPdfContent(file);
+        parsedText = result.text;
+        images = result.images;
       } else if (kind === 'document') {
         parsedText = await extractServerDocument(file, accessKey);
       } else if (kind === 'text') {
@@ -439,29 +448,36 @@ async function addPendingFiles(files, accessKey) {
       base64,
       parsedText,
       parseError,
+      images,
     });
   }
 
   renderAttachments();
 }
 
-async function extractOfficeText(file, kind) {
+async function extractOfficeContent(file, kind) {
   const arrayBuffer = await readFileAsArrayBuffer(file);
 
   if (kind === 'docx') {
     const result = await mammoth.extractRawText({ arrayBuffer });
-    return (result.value || '').trim() || null;
+    const images = await extractZipImages(arrayBuffer, /^word\/media\//i);
+    return { text: (result.value || '').trim() || null, images };
   }
 
   if (kind === 'xlsx') {
-    return extractSpreadsheetText(arrayBuffer);
+    return {
+      text: extractSpreadsheetText(arrayBuffer),
+      images: await extractZipImages(arrayBuffer, /^xl\/media\//i),
+    };
   }
 
   if (kind === 'pptx') {
-    return extractPptxText(arrayBuffer);
+    const { text, mediaOrder } = await extractPptxContent(arrayBuffer);
+    const images = await extractZipImages(arrayBuffer, /^ppt\/media\//i, mediaOrder);
+    return { text, images };
   }
 
-  return null;
+  return { text: null, images: [] };
 }
 
 function extractSpreadsheetText(arrayBuffer) {
@@ -474,19 +490,108 @@ function extractSpreadsheetText(arrayBuffer) {
   return chunks.join('\n\n').trim() || null;
 }
 
-async function extractPptxText(arrayBuffer) {
+// 提取 pptx 文字，并按「第几页用了哪张图」返回媒体文件顺序
+async function extractPptxContent(arrayBuffer) {
   const zip = await JSZip.loadAsync(arrayBuffer);
   const slidePaths = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
     .sort((a, b) => slideNumber(a) - slideNumber(b));
 
   const slides = [];
+  const mediaOrder = [];
+  const seen = new Set();
+
   for (const path of slidePaths) {
     const xml = await zip.file(path).async('string');
     const text = xmlToText(xml);
     if (text) slides.push(`## 第 ${slideNumber(path)} 页\n${text}`);
+
+    // a:blip r:embed="rIdX" -> 记录该页图片资源
+    const relPath = `ppt/slides/_rels/${path.split('/').pop()}.rels`;
+    const relFile = zip.file(relPath);
+    if (!relFile) continue;
+    const relXml = await relFile.async('string');
+    [...relXml.matchAll(/Id="([^"]+)"[^>]*Target="([^"]*media\/[^"]+)"/gi)].forEach((m) => {
+      const target = m[2].replace(/^\.\.\//, 'ppt/').replace(/^\.\.\//, '');
+      const normalized = target.startsWith('ppt/') ? target : `ppt/${target}`;
+      if (seen.has(normalized)) return;
+      seen.add(normalized);
+      mediaOrder.push(normalized);
+    });
   }
-  return slides.join('\n\n').trim() || null;
+
+  const ordered = mediaOrder.filter((p) => /^ppt\/media\//i.test(p));
+  return { text: slides.join('\n\n').trim() || null, mediaOrder: ordered };
+}
+
+// 按顺序提取 zip 里的图片并转成 data URL（带数量与体积上限）
+async function extractZipImages(arrayBuffer, pattern, order = []) {
+  if (typeof JSZip === 'undefined') return [];
+
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(arrayBuffer);
+  } catch {
+    return [];
+  }
+
+  const allPaths = Object.keys(zip.files).filter(
+    (name) => pattern.test(name) && !zip.files[name].dir && isImagePath(name),
+  );
+  const paths = order && order.length
+    ? [...order.filter((p) => allPaths.includes(p)), ...allPaths.filter((p) => !order.includes(p))]
+    : allPaths;
+
+  const images = [];
+  let budget = MAX_DOC_IMAGE_BYTES * 4;
+
+  for (const path of paths.slice(0, MAX_DOC_IMAGES * 2)) {
+    if (images.length >= MAX_DOC_IMAGES) break;
+    if (budget <= 0) break;
+
+    let blob;
+    try {
+      blob = await zip.file(path).async('blob');
+    } catch {
+      continue;
+    }
+    const buffer = await blob.arrayBuffer();
+    if (buffer.byteLength > MAX_DOC_IMAGE_BYTES) continue;
+    budget -= buffer.byteLength;
+
+    const mime = mimeFromPath(path) || blob.type || 'image/png';
+    images.push({ name: path.split('/').pop(), dataUrl: `data:${mime};base64,${arrayBufferToBase64(buffer)}` });
+  }
+
+  return images;
+}
+
+function isImagePath(path) {
+  return /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(path);
+}
+
+function mimeFromPath(path) {
+  const ext = String(path).toLowerCase().split('.').pop();
+  const map = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff' };
+  return map[ext] || '';
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function canvasToDataUrl(canvas) {
+  try {
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } catch {
+    return '';
+  }
 }
 
 function slideNumber(path) {
@@ -530,19 +635,46 @@ async function extractArchiveText(file) {
   return summary.join('\n').trim() || null;
 }
 
-async function extractPdfText(file) {
+async function extractPdfContent(file) {
   const arrayBuffer = await readFileAsArrayBuffer(file);
   const pdfjsLib = window['pdfjs-dist/build/pdf'];
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
   const pageTexts = [];
+  const images = [];
+  const renderPages = Math.min(pdf.numPages, MAX_PDF_PAGES);
+
   for (let i = 1; i <= pdf.numPages; i += 1) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
     const pageText = textContent.items.map((item) => item.str).join(' ');
     if (pageText.trim()) pageTexts.push(`[第 ${i} 页]\n${pageText}`);
+
+    if (i <= renderPages) {
+      try {
+        const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: context, viewport }).promise;
+        const dataUrl = canvasToDataUrl(canvas);
+        if (dataUrl) images.push({ name: `page-${i}.jpg`, dataUrl });
+        canvas.width = 0;
+        canvas.height = 0;
+      } catch (err) {
+        console.warn(`PDF 第 ${i} 页渲染失败`, err);
+      }
+    }
   }
-  return pageTexts.join('\n\n').trim() || null;
+
+  return {
+    text: pageTexts.join('\n\n').trim() || null,
+    images,
+  };
 }
 
 async function extractServerDocument(file, accessKey) {
@@ -616,9 +748,13 @@ function renderAttachments() {
 
   state.pendingAttachments.forEach((file) => {
     const item = document.createElement('div');
-    const failed = file.parseError && file.parsedText == null;
+    const imageCount = Array.isArray(file.images) ? file.images.length : 0;
+    const failed = file.parseError && file.parsedText == null && !imageCount;
     item.className = `attachment-chip${failed ? ' attachment-chip-error' : ''}`;
-    const meta = `${formatBytes(file.size)} · ${escapeHtml(file.kind)}${failed ? ` · 解析失败` : ''}`;
+    const extras = [];
+    if (imageCount) extras.push(`${imageCount} 张图`);
+    if (failed) extras.push('解析失败');
+    const meta = `${formatBytes(file.size)} · ${escapeHtml(file.kind)}${extras.length ? ` · ${extras.join(' · ')}` : ''}`;
     item.innerHTML = `
       <div class="attachment-chip-main">
         <div class="attachment-name">${escapeHtml(file.name)}</div>
@@ -1180,18 +1316,21 @@ function estimateContextSize(conversation, pendingText = '') {
   if (!conversation) return pendingText.length;
 
   let total = pendingText.length;
+
+  // 只估算文本体量；图片有独立预算，不占用 256KB 文本上限
+  state.pendingAttachments.forEach((file) => {
+    if (file.parsedText) total += String(file.parsedText).length;
+  });
+
   conversation.messages.forEach((message) => {
     const content = message.content;
     if (typeof content === 'string') {
       total += content.length;
     } else if (Array.isArray(content)) {
       content.forEach((part) => {
-        total += String(part?.text || part?.image_url?.url || '').length;
+        if (part?.type === 'text') total += String(part.text || '').length;
       });
     }
-    (message.attachments || []).forEach((file) => {
-      total += Number(file?.size) || 0;
-    });
   });
 
   return total;
@@ -1256,16 +1395,28 @@ function buildUserMessage(message, attachments) {
         text: `文件名：${file.name}\n内容：\n\`\`\`\n${decoded}\n\`\`\``,
       });
     } else if (file.kind === 'document' || file.kind === 'pdf' || file.kind === 'docx' || file.kind === 'xlsx' || file.kind === 'pptx' || file.kind === 'archive') {
-      // 文档 / 表格 / 演示 / 压缩包：使用解析出的文本内联
+      // 文档 / 表格 / 演示 / 压缩包：文本 + 内嵌图片
+      const images = Array.isArray(file.images) ? file.images : [];
+
       if (file.parsedText != null && file.parsedText !== '') {
+        const imageNote = images.length ? `\n（该文档还包含 ${images.length} 张内嵌图片，随后附上）` : '';
         content.push({
           type: 'text',
-          text: `文件名：${file.name}\n内容：\n\`\`\`\n${file.parsedText}\n\`\`\``,
+          text: `文件名：${file.name}\n内容：\n\`\`\`\n${file.parsedText}\n\`\`\`${imageNote}`,
         });
+      } else if (images.length) {
+        content.push({ type: 'text', text: `文件名：${file.name}（无文字层，以下是其中的 ${images.length} 张图片）` });
       } else {
         const reason = file.parseError ? `解析失败（${file.parseError}）` : '未能提取到文本内容';
         nonInlineable.push({ name: file.name, type: file.type, size: file.size, note: reason });
       }
+
+      images.forEach((image, index) => {
+        if (index === 0) {
+          content.push({ type: 'text', text: `【${file.name} 的图片】` });
+        }
+        content.push({ type: 'image_url', image_url: { url: image.dataUrl } });
+      });
     } else {
       // 其他二进制：记录下来，后面统一追加描述
       nonInlineable.push(file);
@@ -1495,6 +1646,7 @@ function sanitizeConversation(rawConversation) {
                   type: typeof file.type === 'string' ? file.type : 'application/octet-stream',
                   size: Number.isFinite(file.size) ? file.size : 0,
                   kind: typeof file.kind === 'string' ? file.kind : 'file',
+                  imageCount: Array.isArray(file.images) ? file.images.length : 0,
                 }))
             : [],
         }))
@@ -1638,7 +1790,8 @@ function renderMessages() {
       message.attachments.forEach((file) => {
         const chip = document.createElement('div');
         chip.className = 'message-attachment-chip';
-        chip.textContent = `${file.name} · ${formatBytes(file.size)}`;
+        const images = file.imageCount ? ` · ${file.imageCount} 张图` : '';
+        chip.textContent = `${file.name} · ${formatBytes(file.size)}${images}`;
         attachmentWrap.appendChild(chip);
       });
     }
