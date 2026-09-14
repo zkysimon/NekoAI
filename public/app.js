@@ -3,6 +3,10 @@ const ACCESS_KEY_STORAGE = 'nekoai.accessKey';
 const MODEL_STORAGE = 'nekoai.selectedModel';
 const API_BASE_URL = (window.NEKOAI_CONFIG?.API_BASE_URL || '').replace(/\/$/, '');
 const MAX_ATTACHMENT_SIZE = 15 * 1024 * 1024;
+const MAX_CONTEXT_CHARS = 256 * 1024;
+const MAX_STORED_TRACE_ITEMS = 8;
+const MAX_STORED_TEXT_CHARS = 400;
+const MAX_STORED_SOURCES = 5;
 
 const state = {
   conversations: loadConversations(),
@@ -40,6 +44,14 @@ const attachBtnEl = document.getElementById('attachBtn');
 const attachmentListEl = document.getElementById('attachmentList');
 const stopBtnEl = document.getElementById('stopBtn');
 const exportBtnEl = document.getElementById('exportBtn');
+const modalRootEl = document.getElementById('modalRoot');
+const modalBackdropEl = document.getElementById('modalBackdrop');
+const modalCardEl = document.getElementById('modalCard');
+const modalIconEl = document.getElementById('modalIcon');
+const modalTitleEl = document.getElementById('modalTitle');
+const modalBodyEl = document.getElementById('modalBody');
+const modalActionsEl = document.getElementById('modalActions');
+const toastRootEl = document.getElementById('toastRoot');
 
 function boot() {
   applyThemeByTime();
@@ -89,9 +101,15 @@ function bindEvents() {
     focusComposer();
   });
 
-  clearAllBtnEl.addEventListener('click', () => {
+  clearAllBtnEl.addEventListener('click', async () => {
     if (!state.conversations.length) return;
-    const confirmed = window.confirm('确认清空全部会话吗？清空后当前浏览器中的聊天记录将无法恢复。');
+    const confirmed = await confirmDialog({
+      icon: '🗑️',
+      title: '清空全部会话',
+      message: `将删除全部 ${state.conversations.length} 个会话，此操作无法恢复。`,
+      confirmLabel: '全部清空',
+      danger: true,
+    });
     if (!confirmed) return;
 
     state.conversations = [];
@@ -101,6 +119,7 @@ function bindEvents() {
     renderMessages();
     renderModelDropdown();
     focusComposer();
+    showToast('已清空全部会话', 'success');
   });
 
   modelDropdownButtonEl.addEventListener('click', () => {
@@ -143,6 +162,16 @@ function bindEvents() {
     exportConversation();
   });
 
+  modalBackdropEl?.addEventListener('click', () => {
+    if (modalRootEl.dataset.dismissible === '1') closeModal(false);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !modalRootEl.classList.contains('hidden')) {
+      if (modalRootEl.dataset.dismissible === '1') closeModal(false);
+    }
+  });
+
   messageInputEl.addEventListener('input', () => {
     autoResizeTextarea();
   });
@@ -169,8 +198,31 @@ function bindEvents() {
 
     const model = state.selectedModel;
     if (!model) {
-      alert('当前没有可用模型，请先刷新模型列表');
+      noticeDialog({ title: '没有可用模型', message: '当前没有可用模型，请先刷新页面重新加载模型列表。' });
       return;
+    }
+
+    const contextSize = estimateContextSize(getActiveConversation(), text);
+    if (contextSize > MAX_CONTEXT_CHARS) {
+      const startNew = await confirmDialog({
+        icon: '📏',
+        title: '会话过长',
+        message:
+          `当前会话内容约 ${formatBytes(contextSize)}，已超过 ${formatBytes(MAX_CONTEXT_CHARS)} 上限。\n\n` +
+          '继续发送可能失败或产生高额费用，建议新开一个会话。是否现在新建会话？',
+        confirmLabel: '新建会话',
+        cancelLabel: '继续发送',
+        danger: false,
+      });
+      if (startNew) {
+        state.activeId = createConversation();
+        persistConversations();
+        renderConversationList();
+        renderMessages();
+        renderModelDropdown();
+        focusComposer();
+        return;
+      }
     }
 
     const conversation = getActiveConversation();
@@ -350,7 +402,7 @@ function renderModelDropdown() {
 async function addPendingFiles(files, accessKey) {
   for (const file of files) {
     if (file.size > MAX_ATTACHMENT_SIZE) {
-      alert(`${file.name} 超过 15MB，先跳过了。`);
+      showToast(`${file.name} 超过 15MB，已跳过`, 'warn');
       continue;
     }
 
@@ -1124,6 +1176,27 @@ function closeRunningActivities(message, status) {
   });
 }
 
+function estimateContextSize(conversation, pendingText = '') {
+  if (!conversation) return pendingText.length;
+
+  let total = pendingText.length;
+  conversation.messages.forEach((message) => {
+    const content = message.content;
+    if (typeof content === 'string') {
+      total += content.length;
+    } else if (Array.isArray(content)) {
+      content.forEach((part) => {
+        total += String(part?.text || part?.image_url?.url || '').length;
+      });
+    }
+    (message.attachments || []).forEach((file) => {
+      total += Number(file?.size) || 0;
+    });
+  });
+
+  return total;
+}
+
 function buildChatPayload(model, conversation, assistantMessage, attachments) {
   const messages = conversation.messages
     .filter((item) => item !== assistantMessage)
@@ -1307,7 +1380,7 @@ async function regenLastAssistant() {
 function exportConversation() {
   const conversation = getActiveConversation();
   if (!conversation || !conversation.messages.length) {
-    alert('当前会话没有内容可以导出。');
+    showToast('当前会话没有内容可以导出', 'warn');
     return;
   }
 
@@ -1389,40 +1462,31 @@ function sanitizeConversation(rawConversation) {
           createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
           thinkMs: Number.isFinite(message.thinkMs) ? message.thinkMs : undefined,
           searchError: typeof message.searchError === 'string' ? message.searchError : undefined,
-          trace: Array.isArray(message.trace)
-            ? message.trace
-                .filter((activity) => activity && typeof activity === 'object')
-                .map((activity) => ({
-                  id: typeof activity.id === 'string' ? activity.id : crypto.randomUUID(),
-                  type: ['think', 'search', 'fetch', 'note'].includes(activity.type) ? activity.type : 'search',
-                  query: typeof activity.query === 'string' ? activity.query : '',
-                  url: typeof activity.url === 'string' ? activity.url : '',
-                  label: typeof activity.label === 'string' ? activity.label : '',
-                  excerpt: typeof activity.excerpt === 'string' ? activity.excerpt : '',
-                  text: typeof activity.text === 'string' ? activity.text : '',
-                  status: typeof activity.status === 'string' ? activity.status : 'done',
-                  ms: Number.isFinite(activity.ms) ? activity.ms : undefined,
-                  error: typeof activity.error === 'string' ? activity.error : undefined,
-                  results: Array.isArray(activity.results)
-                    ? activity.results
-                        .filter((source) => source && typeof source === 'object')
-                        .map((source) => ({
-                          title: typeof source.title === 'string' ? source.title : '',
-                          url: typeof source.url === 'string' ? source.url : '',
-                          text: typeof source.text === 'string' ? source.text : '',
-                        }))
-                    : [],
-                }))
-            : [],
-          sources: Array.isArray(message.sources)
-            ? message.sources
+          trace: (Array.isArray(message.trace) ? message.trace : [])
+            .filter((activity) => activity && typeof activity === 'object')
+            .slice(-MAX_STORED_TRACE_ITEMS)
+            .map((activity) => ({
+              id: typeof activity.id === 'string' ? activity.id : crypto.randomUUID(),
+              type: ['think', 'search', 'fetch', 'note'].includes(activity.type) ? activity.type : 'search',
+              query: truncate(activity.query, MAX_STORED_TEXT_CHARS),
+              url: truncate(activity.url, 500),
+              label: typeof activity.label === 'string' ? activity.label : '',
+              excerpt: truncate(activity.excerpt, MAX_STORED_TEXT_CHARS),
+              text: truncate(activity.text, MAX_STORED_TEXT_CHARS),
+              status: typeof activity.status === 'string' ? activity.status : 'done',
+              ms: Number.isFinite(activity.ms) ? activity.ms : undefined,
+              error: truncate(activity.error, MAX_STORED_TEXT_CHARS),
+              results: (Array.isArray(activity.results) ? activity.results : [])
                 .filter((source) => source && typeof source === 'object')
+                .slice(0, MAX_STORED_SOURCES)
                 .map((source) => ({
-                  title: typeof source.title === 'string' ? source.title : '',
-                  url: typeof source.url === 'string' ? source.url : '',
-                  text: typeof source.text === 'string' ? source.text : '',
-                }))
-            : [],
+                  title: truncate(source.title, MAX_STORED_TEXT_CHARS),
+                  url: truncate(source.url, 500),
+                  text: '',
+                })),
+            })),
+          // sources 与 trace.results 重复，持久化时不再单独保存大文本
+          sources: [],
           attachments: Array.isArray(message.attachments)
             ? message.attachments
                 .filter((file) => file && typeof file === 'object')
@@ -1446,11 +1510,17 @@ function sanitizeConversation(rawConversation) {
   };
 }
 
-function deleteConversation(id) {
+async function deleteConversation(id) {
   const target = state.conversations.find((item) => item.id === id);
   if (!target) return;
 
-  const confirmed = window.confirm(`确认删除会话「${target.title || '新会话'}」吗？删除后无法恢复。`);
+  const confirmed = await confirmDialog({
+    icon: '🗑️',
+    title: '删除会话',
+    message: `将删除会话「${target.title || '新会话'}」，此操作无法恢复。`,
+    confirmLabel: '删除',
+    danger: true,
+  });
   if (!confirmed) return;
 
   state.conversations = state.conversations.filter((item) => item.id !== id);
@@ -1465,6 +1535,7 @@ function deleteConversation(id) {
   renderConversationList();
   renderMessages();
   renderModelDropdown();
+  showToast('会话已删除', 'success');
 }
 
 function getActiveConversation() {
@@ -1973,37 +2044,32 @@ function extractTaggedThinking(text) {
 function renderMarkdown(input) {
   const renderer = new marked.Renderer();
 
-  renderer.code = ({ text, lang }) => {
-    const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  renderer.code = ({ text }) => {
+    const escaped = escapeHtml(text);
     return `<div class="md-pre-wrap"><pre class="md-pre"><code>${escaped}</code></pre><button class="copy-code-btn" type="button">复制</button></div>`;
   };
 
   renderer.image = ({ href, title, text }) => {
-    if (!href) return '';
-    const isVideo = /\.(mp4|webm|ogg|mov)([?#]|$)/i.test(href) || /video/i.test(href);
+    const url = safeUrl(href);
+    if (!url) return escapeHtml(text || '');
+    const isVideo = /\.(mp4|webm|ogg|mov)([?#]|$)/i.test(url) || /video/i.test(url);
     if (isVideo) {
-      return `<video class="message-inline-video" controls playsinline preload="metadata" style="max-width:100%;border-radius:12px;margin-top:8px">
-        <source src="${href}">
-        <a href="${href}" target="_blank">点击查看视频</a>
-      </video>`;
+      return `<video class="message-inline-video" controls playsinline preload="metadata"><source src="${escapeHtml(url)}"><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">点击查看视频</a></video>`;
     }
-    const alt = text || title || '';
-    return `<img class="message-inline-image" src="${href}" alt="${alt}">`;
+    return `<img class="message-inline-image" src="${escapeHtml(url)}" alt="${escapeHtml(text || title || '')}">`;
   };
 
-  renderer.link = ({ href, title, text }) => {
-    if (!href) return text;
-    const isVideo = /\.(mp4|webm|ogg|mov)([?#]|$)/i.test(href) || /video/i.test(href);
+  renderer.link = ({ href, text }) => {
+    const url = safeUrl(href);
+    if (!url) return escapeHtml(text || '');
+    const isVideo = /\.(mp4|webm|ogg|mov)([?#]|$)/i.test(url) || /video/i.test(url);
     if (isVideo) {
-      return `<video class="message-inline-video" controls playsinline preload="metadata" style="max-width:100%;border-radius:12px;margin-top:8px">
-        <source src="${href}">
-        <a href="${href}" target="_blank">点击查看视频</a>
-      </video>`;
+      return `<video class="message-inline-video" controls playsinline preload="metadata"><source src="${escapeHtml(url)}"><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">点击查看视频</a></video>`;
     }
-    return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text || url)}</a>`;
   };
 
-  return marked.parse(String(input || ''), { renderer, breaks: true });
+  return sanitizeHtml(marked.parse(String(input || ''), { renderer, breaks: true }));
 }
 
 function extractImageDataUrls(text) {
@@ -2068,7 +2134,39 @@ function applyThemeByTime() {
 
 function persistConversations() {
   const safeConversations = state.conversations.map((conversation) => sanitizeConversation(conversation)).filter(Boolean);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(safeConversations));
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeConversations));
+    return true;
+  } catch (error) {
+    console.warn('本地存储写入失败', error);
+  }
+
+  // 空间不足：逐步丢弃最旧的会话后重试
+  try {
+    let trimmed = safeConversations.map((conversation) => ({
+      ...conversation,
+      messages: conversation.messages.slice(-20),
+    }));
+
+    while (trimmed.length > 1) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+        state.conversations = trimmed;
+        showToast('本地存储空间不足，已清理较早的会话记录', 'warn');
+        return true;
+      } catch {
+        trimmed = trimmed.slice(0, Math.max(1, trimmed.length - 10));
+      }
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+    showToast('本地存储空间不足，聊天记录未能保存', 'warn');
+    return false;
+  } catch (error) {
+    console.warn('本地存储清理失败', error);
+    return false;
+  }
 }
 
 function loadConversations() {
@@ -2144,6 +2242,11 @@ function formatBytes(bytes) {
   return `${value >= 10 || idx === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[idx]}`;
 }
 
+function truncate(value, max) {
+  if (typeof value !== 'string') return '';
+  return value.length > max ? value.slice(0, max) : value;
+}
+
 function escapeHtml(text) {
   return String(text)
     .replaceAll('&', '&amp;')
@@ -2151,6 +2254,145 @@ function escapeHtml(text) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+/* ── 自定义弹窗与提示（替代原生 confirm/alert） ── */
+
+let modalResolver = null;
+
+function closeModal(result) {
+  modalRootEl.classList.add('hidden');
+  modalCardEl.classList.remove('modal-enter');
+  const resolve = modalResolver;
+  modalResolver = null;
+  if (resolve) resolve(result);
+}
+
+function openModal({ icon, title, body, actions, dismissible = true }) {
+  return new Promise((resolve) => {
+    if (modalResolver) {
+      const prev = modalResolver;
+      modalResolver = null;
+      prev(false);
+    }
+    modalResolver = resolve;
+
+    modalIconEl.textContent = icon || '';
+    modalIconEl.classList.toggle('hidden', !icon);
+    modalTitleEl.textContent = title || '';
+    modalBodyEl.innerHTML = '';
+    if (typeof body === 'string') {
+      modalBodyEl.innerHTML = body;
+    } else if (body instanceof Node) {
+      modalBodyEl.appendChild(body);
+    }
+    modalBodyEl.classList.toggle('hidden', !modalBodyEl.childNodes.length && !body);
+
+    modalActionsEl.innerHTML = '';
+    const list = actions && actions.length
+      ? actions
+      : [{ label: '知道了', value: true, variant: 'primary' }];
+
+    list.forEach((action) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `modal-btn modal-btn-${action.variant || 'ghost'}`;
+      btn.textContent = action.label;
+      btn.addEventListener('click', () => {
+        closeModal(action.value !== undefined ? action.value : true);
+      });
+      modalActionsEl.appendChild(btn);
+    });
+
+    modalRootEl.dataset.dismissible = dismissible ? '1' : '0';
+    modalRootEl.classList.remove('hidden');
+    requestAnimationFrame(() => modalCardEl.classList.add('modal-enter'));
+    focusFirstModalButton();
+  });
+}
+
+function focusFirstModalButton() {
+  const btn = modalActionsEl.querySelector('.modal-btn-primary') || modalActionsEl.querySelector('.modal-btn');
+  if (btn) btn.focus();
+}
+
+function confirmDialog({ title, message, confirmLabel = '确认', cancelLabel = '取消', danger = false, icon = '⚠️' }) {
+  return openModal({
+    icon,
+    title,
+    body: `<p>${escapeHtml(message)}</p>`,
+    actions: [
+      { label: cancelLabel, value: false, variant: 'ghost' },
+      { label: confirmLabel, value: true, variant: danger ? 'danger' : 'primary' },
+    ],
+  });
+}
+
+function noticeDialog({ title, message, icon = 'ℹ️', confirmLabel = '知道了' }) {
+  return openModal({
+    icon,
+    title,
+    body: `<p>${escapeHtml(message)}</p>`,
+    actions: [{ label: confirmLabel, value: true, variant: 'primary' }],
+  });
+}
+
+function showToast(message, variant = 'info') {
+  if (!toastRootEl) return;
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${variant}`;
+  toast.textContent = message;
+  toastRootEl.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('toast-enter'));
+  setTimeout(() => {
+    toast.classList.remove('toast-enter');
+    setTimeout(() => toast.remove(), 220);
+  }, 2600);
+}
+
+/* ── HTML 净化（防 XSS） ── */
+
+function sanitizeHtml(html) {
+  if (window.DOMPurify) {
+    return window.DOMPurify.sanitize(String(html || ''), {
+      FORBID_TAGS: ['style', 'form', 'input', 'button', 'iframe', 'object', 'embed'],
+      FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick'],
+      ALLOW_DATA_ATTR: false,
+    });
+  }
+
+  // DOMPurify 未加载时的兜底：只放行最基础的标签
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  const allowed = new Set(['P', 'BR', 'STRONG', 'EM', 'B', 'I', 'U', 'S', 'CODE', 'PRE', 'SPAN',
+    'UL', 'OL', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'A', 'HR', 'TABLE',
+    'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'DEL', 'DIV', 'IMG', 'DETAILS', 'SUMMARY']);
+  const walk = (node) => {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === 1) {
+        if (!allowed.has(child.tagName)) {
+          child.replaceWith(document.createTextNode(child.textContent || ''));
+          return;
+        }
+        [...child.attributes].forEach((attr) => {
+          const name = attr.name.toLowerCase();
+          if (name.startsWith('on') || name === 'style') child.removeAttribute(attr.name);
+          if ((name === 'href' || name === 'src') && /^\s*javascript:/i.test(attr.value)) {
+            child.removeAttribute(attr.name);
+          }
+        });
+        walk(child);
+      }
+    });
+  };
+  walk(template.content);
+  return template.innerHTML;
+}
+
+function safeUrl(url) {
+  const value = String(url || '').trim();
+  if (/^(https?:|mailto:|data:image\/)/i.test(value)) return value;
+  return '';
 }
 
 // 在文件末尾启动，确保所有 const 常量都已初始化

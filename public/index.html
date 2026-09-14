@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=20260914d" />
+    <link rel="stylesheet" href="/styles.css?v=20260914e" />
   </head>
   <body>
     <div id="loginScreen" class="login-screen">
@@ -90,12 +90,25 @@
       </main>
     </div>
 
+    <div id="modalRoot" class="modal-root hidden">
+      <div id="modalBackdrop" class="modal-backdrop"></div>
+      <div id="modalCard" class="modal-card" role="dialog" aria-modal="true">
+        <div id="modalIcon" class="modal-icon"></div>
+        <h3 id="modalTitle" class="modal-title"></h3>
+        <div id="modalBody" class="modal-body"></div>
+        <div id="modalActions" class="modal-actions"></div>
+      </div>
+    </div>
+
+    <div id="toastRoot" class="toast-root"></div>
+
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="/config.js?v=20260914d"></script>
-    <script src="/app.js?v=20260914d" defer></script>
+    <script src="/config.js?v=20260914e"></script>
+    <script src="/app.js?v=20260914e" defer></script>
   </body>
 </html>

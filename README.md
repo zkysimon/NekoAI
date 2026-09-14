@@ -26,7 +26,7 @@ Workers API 需要：
 - `OPENAI_API_KEY`：上游 API Key
 - `ACCESS_KEY`：给朋友使用的共享访问密钥
 - `ALLOWED_ORIGIN`：允许访问 API 的前端站点域名（可选）
-- `MAX_TOKENS`：单次回复最大 token（可选，默认 4096）
+- `MAX_TOKENS`：单次回复最大 token（可选，默认 8192）
 - `EXA_BASE_URL`：Exa 搜索接口地址（可选，默认 `https://api.exa.ai`）
 - `EXA_API_KEY`：Exa API Key（配置后自动启用联网搜索；未配置则静默跳过）
 - `EXA_SEARCH_PATH`：Exa 搜索路径（可选，默认 `/search`）
@@ -38,7 +38,7 @@ OPENAI_BASE_URL="https://api.example.com"
 OPENAI_API_KEY="sk-xxxx"
 ACCESS_KEY="nekoai-2026"
 ALLOWED_ORIGIN="https://nekoai.pages.dev"
-MAX_TOKENS="4096"
+MAX_TOKENS="8192"
 EXA_BASE_URL="https://api.exa.ai"
 EXA_API_KEY="exa-xxxx"
 EXA_SEARCH_PATH="/search"
@@ -86,7 +86,7 @@ npx wrangler secret put EXA_API_KEY
   "vars": {
     "EXA_BASE_URL": "https://api.exa.ai",
     "EXA_SEARCH_PATH": "/search",
-    "MAX_TOKENS": "4096"
+    "MAX_TOKENS": "8192"
   }
 }
 ```

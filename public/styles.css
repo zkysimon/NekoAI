@@ -943,3 +943,107 @@ body.theme-light .copy-code-btn:hover { background: rgba(0,0,0,.12); color: #111
   border-color: rgba(255, 138, 138, .5);
 }
 .attachment-chip-error .attachment-meta { color: #ff8a8a; }
+
+/* ── 自定义弹窗 ── */
+.modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .5);
+  backdrop-filter: blur(2px);
+  animation: modal-fade .18s ease;
+}
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal-card {
+  position: relative;
+  width: min(440px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 22px 22px 18px;
+  transform: translateY(12px) scale(.97);
+  opacity: 0;
+  transition: transform .22s cubic-bezier(.2,.8,.3,1), opacity .22s ease;
+}
+.modal-card.modal-enter { transform: translateY(0) scale(1); opacity: 1; }
+.modal-icon { font-size: 26px; line-height: 1; margin-bottom: 12px; }
+.modal-title { margin: 0 0 10px; font-size: 17px; font-weight: 700; }
+.modal-body { color: var(--muted); font-size: 14px; line-height: 1.7; }
+.modal-body p { margin: 0 0 10px; white-space: pre-wrap; }
+.modal-body p:last-child { margin-bottom: 0; }
+.modal-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 5px;
+  font-size: .9em;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.modal-btn {
+  padding: 9px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: .16s ease;
+  min-width: 76px;
+}
+.modal-btn:hover { background: var(--panel-hover); }
+.modal-btn:focus-visible { outline: 2px solid #7fb3ff; outline-offset: 2px; }
+.modal-btn-primary { background: #fff; color: #111; border-color: transparent; }
+.modal-btn-primary:hover { background: #e8e8e8; }
+.modal-btn-danger { background: #ff4d4d; color: #fff; border-color: transparent; }
+.modal-btn-danger:hover { background: #e03c3c; }
+body.theme-light .modal-btn-primary { background: #111; color: #fff; }
+body.theme-light .modal-btn-primary:hover { background: #333; }
+
+/* ── 轻提示 ── */
+.toast-root {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+}
+.toast {
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .2s ease, transform .2s ease;
+  max-width: min(80vw, 420px);
+  text-align: center;
+}
+.toast.toast-enter { opacity: 1; transform: translateY(0); }
+.toast-success { border-color: rgba(74, 222, 128, .5); }
+.toast-warn { border-color: rgba(255, 196, 0, .5); color: #ffd166; }
