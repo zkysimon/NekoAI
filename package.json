@@ -5,9 +5,10 @@
   "description": "A minimal Cloudflare Workers AI chat frontend for OpenAI-compatible APIs.",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "devDependencies": {
-    "wrangler": "^4.57.1"
+    "wrangler": "^4.131.2"
   }
 }

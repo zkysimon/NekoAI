@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260914d" />
   </head>
   <body>
     <div id="loginScreen" class="login-screen">
@@ -78,7 +78,7 @@
                   <path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
               </label>
-              <div class="composer-hint">支持图片、文档、压缩包等</div>
+              <div class="composer-hint">默认联网搜索 · 支持图片、PDF、Office、压缩包、代码</div>
               <div class="composer-actions single-line-actions">
                 <button type="button" id="stopBtn" class="stop-btn compact-send-btn hidden">停止</button>
                 <button type="submit" id="sendBtn" class="send-btn compact-send-btn">发送</button>
@@ -94,10 +94,8 @@
     <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-    <script src="/config.js"></script>
-    <script src="/app.js" defer></script>
-  </body>
-</html>
->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="/config.js?v=20260914d"></script>
+    <script src="/app.js?v=20260914d" defer></script>
   </body>
 </html>

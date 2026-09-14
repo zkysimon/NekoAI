@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nekoai-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-21",
+  "observability": {
+    "enabled": true
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+  // 自定义域名（可选）：
+  // "routes": [
+  //   { "pattern": "nekoai-api.yourdomain.com", "custom_domain": true }
+  // ],
+  // 非敏感变量（可选）：
+  // "vars": {
+  //   "EXA_BASE_URL": "https://api.exa.ai",
+  //   "EXA_SEARCH_PATH": "/search",
+  //   "MAX_TOKENS": "8192"
+  // }
+}
