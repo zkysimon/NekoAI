@@ -1444,7 +1444,7 @@ async function runWebSearch(accessKey, query) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessKey}`,
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, fresh: true }),
   });
 
   const data = await response.json().catch(() => ({}));
@@ -1474,17 +1474,23 @@ async function runWebFetch(accessKey, url) {
 function buildSearchSystemPrompt(results) {
   let budget = 6000;
   const lines = [];
+  const today = new Date().toISOString().slice(0, 10);
 
   results.forEach((item, index) => {
     const snippet = String(item.text || '').replace(/\s+/g, ' ').trim();
-    const clipped = snippet.slice(0, Math.min(1200, Math.max(0, budget)));
+    const clipped = snippet.slice(0, Math.min(1500, Math.max(0, budget)));
     budget -= clipped.length;
-    lines.push(`[${index + 1}] ${item.title}\nURL: ${item.url}\n${clipped}`);
+    const date = item.publishedDate ? `\n发布时间：${String(item.publishedDate).slice(0, 10)}` : '';
+    lines.push(`[${index + 1}] ${item.title}\nURL: ${item.url}${date}\n${clipped}`);
   });
 
   return [
-    '你已获得以下实时联网搜索结果，请优先基于这些资料回答，并在引用处用 [序号] 标注来源。',
-    '如果资料不足以回答问题，请如实说明，不要编造。',
+    `今天是 ${today}。你已获得以下实时联网搜索结果（已按查询抽取相关片段），请直接基于这些资料回答。`,
+    '要求：',
+    '1. 优先采信「发布时间」最新、且明确给出具体数值/结论的片段；把其中的关键信息直接写进回答，不要只说"资料不足"。',
+    '2. 若片段之间互相矛盾（例如不同日期的天气），以最新日期为准，并说明差异。',
+    '3. 引用处用 [序号] 标注来源。',
+    '4. 只有在所有片段都确实缺少关键信息时，才说明资料不足，并指出具体缺什么。',
     '',
     ...lines,
   ].join('\n');

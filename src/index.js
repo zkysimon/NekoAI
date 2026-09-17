@@ -234,7 +234,8 @@ async function handleSearch(request, env) {
   }
 
   const numResults = clampNumber(body?.numResults, 1, 20, DEFAULT_EXA_NUM_RESULTS);
-  const searchType = body?.type === 'keyword' ? 'keyword' : 'auto';
+  const searchType = normalizeSearchType(body?.type, env);
+  const fresh = body?.fresh !== false;
   const exaBase = normalizeBaseUrl(env.EXA_BASE_URL) || 'https://api.exa.ai';
   const searchPath = normalizePath(env.EXA_SEARCH_PATH) || DEFAULT_EXA_SEARCH_PATH;
 
@@ -242,14 +243,24 @@ async function handleSearch(request, env) {
     query: query.slice(0, MAX_SEARCH_QUERY_LENGTH),
     type: searchType,
     numResults,
-    contents: { text: { maxCharacters: 2000 } },
+    // highlights 是 Exa 针对查询抽取的「相关片段」，比整页正文（大量导航/模板噪音）更干净
+    contents: {
+      highlights: { query: query.slice(0, MAX_SEARCH_QUERY_LENGTH), maxCharacters: 2000 },
+      text: { maxCharacters: 3000, verbosity: 'compact' },
+    },
   };
+
+  // 天气 / 股价 / 新闻这类需要最新数据的场景，强制抓取新鲜内容
+  if (fresh) searchPayload.contents.maxAgeHours = 0;
 
   if (Array.isArray(body?.includeDomains) && body.includeDomains.length) {
     searchPayload.includeDomains = body.includeDomains.slice(0, 20).map(String);
   }
   if (body?.category) {
     searchPayload.category = String(body.category);
+  }
+  if (typeof body?.userLocation === 'string' && body.userLocation) {
+    searchPayload.userLocation = String(body.userLocation).slice(0, 2);
   }
 
   let upstream;
@@ -288,16 +299,35 @@ async function handleSearch(request, env) {
   }
 
   const results = Array.isArray(data?.results)
-    ? data.results.map((item) => ({
-        title: item?.title || item?.url || '未命名结果',
-        url: item?.url || '',
-        publishedDate: item?.publishedDate || null,
-        author: item?.author || null,
-        text: truncateText(item?.text || item?.summary || '', 2000),
-      }))
+    ? data.results.map((item) => {
+        const highlights = Array.isArray(item?.highlights)
+          ? item.highlights.map((h) => String(h || '').trim()).filter(Boolean)
+          : [];
+        // 优先给模型「高亮片段」，没有再用整页正文
+        const text = highlights.length
+          ? highlights.join('\n…\n')
+          : String(item?.text || item?.summary || '');
+
+        return {
+          title: item?.title || item?.url || '未命名结果',
+          url: item?.url || '',
+          publishedDate: item?.publishedDate || null,
+          author: item?.author || null,
+          highlights,
+          text: truncateText(text, 2500),
+        };
+      })
     : [];
 
   return json({ query: searchPayload.query, results }, 200, request, env);
+}
+
+function normalizeSearchType(value, env) {
+  const allowed = ['instant', 'fast', 'auto', 'deep-lite', 'deep', 'deep-reasoning'];
+  const raw = String(value || '').trim();
+  if (allowed.includes(raw)) return raw;
+  const fallback = String(env.EXA_SEARCH_TYPE || 'auto').trim();
+  return allowed.includes(fallback) ? fallback : 'auto';
 }
 
 async function handleFetch(request, env) {

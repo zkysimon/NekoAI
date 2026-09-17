@@ -141,9 +141,13 @@ window.NEKOAI_CONFIG = {
 
 ### `POST /api/search`
 - 需要 `Authorization: Bearer <ACCESS_KEY>`
-- 调用后端配置的 Exa 接口（`EXA_BASE_URL` + `EXA_API_KEY`）
-- 请求体：`{ "query": "关键词", "numResults": 5, "type": "auto" }`
-- 返回：`{ "query": "...", "results": [{ "title", "url", "text", ... }] }`
+- 调用后端配置的 Exa `POST /search`（`EXA_BASE_URL` + `EXA_API_KEY`）
+- 请求体：`{ "query": "关键词", "numResults": 5, "type": "auto", "fresh": true }`
+- 使用 Exa 的 **highlights**（针对查询抽取的相关片段）+ `verbosity: compact` 文本，
+  并默认带 `maxAgeHours: 0` 强制取新鲜内容——整页正文里大量是导航/模板噪音，
+  反而会让模型判断"资料不足"
+- 返回：`{ "query": "...", "results": [{ "title", "url", "publishedDate", "highlights", "text" }] }`
+- `type` 支持 `instant | fast | auto | deep-lite | deep | deep-reasoning`（可用 `EXA_SEARCH_TYPE` 设默认值）
 - URL / API Key 完全由 Cloudflare 后端环境变量控制，前端不保存任何 Exa 凭据
 
 ### `POST /api/fetch`
